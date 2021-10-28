@@ -29,8 +29,12 @@ int main(int argc, char const *argv[])
     serv_sock = socket(PF_INET, SOCK_STREAM, 0);
     assert(serv_sock >= 0);
     setsockopt(serv_sock, SOL_SOCKET, SO_RCVBUF, &recv_bufsize, sizeof(recv_bufsize));
-    int len;
-    getsockopt(serv_sock, SOL_SOCKET, SO_RCVBUF, &recv_bufsize, (socklen_t*)&len);
+    int tmp = 0;
+    int len = sizeof(tmp);
+    cout << tmp << " " << len << endl;
+    getsockopt(serv_sock, SOL_SOCKET, SO_RCVBUF, &tmp, (socklen_t*)&len);
+    printf("the tcp recv buffer size after setting is %d\n", tmp);
+    cout << len << endl;
 
     // bind
     res = bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr));

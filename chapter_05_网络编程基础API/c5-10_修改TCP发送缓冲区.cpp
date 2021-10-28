@@ -7,7 +7,7 @@
 #include <string.h>
 using namespace std;
 
-#define BUF_SIZE 512
+#define BUF_SIZE 4000
 
 int main(int argc, char const *argv[])
 {
