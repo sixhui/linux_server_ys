@@ -58,8 +58,13 @@ int main(int argc, char const *argv[])
     fds[0].events = POLLIN | POLLERR;
     fds[0].revents = 0;
 
+    cout << "server ready" << endl;
+
     while(1){
         res = poll(fds, user_counter + 1, -1);
+        sleep(1);
+        cout << "after poll" << endl;
+
         assert(res > 0);
 
         for(int i = 0; i < user_counter + 1; ++i){
@@ -70,6 +75,7 @@ int main(int argc, char const *argv[])
                 assert(clnt_sock >= 0);
 
                 /* 如果请求太多，则关闭新到的连接 ... */
+
 
                 ++user_counter;
                 users[clnt_sock].addr = clnt_addr;
@@ -82,12 +88,19 @@ int main(int argc, char const *argv[])
             }
             else if(fds[i].revents & POLLERR){
                 cout << "get an error from " << fds[i].fd << endl;
+                char errors[100];
+                memset(errors, '\0', 100);
+                socklen_t len = sizeof(errors);
+                if(getsockopt(fds[i].fd, SOL_SOCKET, SO_ERROR, &errors, &len) < 0){
+                    cout << "get socket option failed" << endl;
+                }
+                
                 continue;
             }
             else if(fds[i].revents & POLLRDHUP){
                 /* 如果客户端关闭连接，则服务器也关闭连接，并将用户数减 1 */
                 close(fds[i].fd);
-                users[fds[i].fd] = users[fds[user_counter].fd];
+                // users[fds[i].fd] = users[fds[user_counter].fd];
                 fds[i] = fds[user_counter];
                 --i;
                 --user_counter;
@@ -102,35 +115,43 @@ int main(int argc, char const *argv[])
                     /* 读出错，则关闭连接 */
                     if(errno != EAGAIN){
                         close(fds[i].fd);
-                        users[fds[i].fd] = users[fds[user_counter].fd];
+                        // users[fds[i].fd] = users[fds[user_counter].fd];
                         fds[i] = fds[user_counter];
                         --i;
                         --user_counter;
                     }
                 }
-                else if(res == 0){
-
+                else if(res == 0){ /* 对方关闭连接 */
+                    cout << "close for res == 0" << endl;
+                    close(fds[i].fd);
+                    // users[fds[i].fd] = users[fds[user_counter].fd];
+                    fds[i] = fds[user_counter];
+                    --i;
+                    --user_counter;
                 }
                 else{
                     /* 收到数据，通知其他 socket 连接准备写数据 */
                     for(int j = 1; j <= user_counter; ++j){
                         if(fds[j].fd == connfd) continue;
 
-                        fds[j].events |= ~POLLIN;
+                        fds[j].events &= ~POLLIN;
                         fds[j].events |= POLLOUT;
                         users[fds[j].fd].write_buf = users[connfd].buf;
                     }
                 }
             }
             else if(fds[i].revents & POLLOUT){
+                cout << "POLLOUT " << fds[i].fd << endl;
                 int connfd = fds[i].fd;
+                // cout << users[connfd].write_buf << endl;
                 if(!users[connfd].write_buf) continue;
 
                 res = send(connfd, users[connfd].write_buf, strlen(users[connfd].write_buf), 0);
-                users[connfd].write_buf = nullptr;
+                cout << "SEND " << connfd << " " << res << endl;
+                users[connfd].write_buf = NULL;
                 
                 // 重新注册可读事件
-                fds[i].events |= ~POLLOUT;
+                fds[i].events &= ~POLLOUT;
                 fds[i].events |= POLLIN;
 
             }
