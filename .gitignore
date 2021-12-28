@@ -1,1 +1,4 @@
 *.exe
+*.out
+demo_*
+test_*
