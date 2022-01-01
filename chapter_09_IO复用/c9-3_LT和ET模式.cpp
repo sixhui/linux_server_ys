@@ -117,7 +117,7 @@ void et(epoll_event* events, int number, int epollfd, int listenfd){
             }
         }
         else if(events[i].events & EPOLLIN){
-            cout << "EPOLLIN ET trigger once" << endl;
+            cout << "===EPOLLIN ET triger===" << endl;
 
             while(1){
                 memset(buf, '\0', BUFFER_SIZE);
@@ -141,7 +141,7 @@ void et(epoll_event* events, int number, int epollfd, int listenfd){
                 }
             }
 
-            cout << "EPOLLIN ET exist" << endl;
+            cout << "===EPOLLIN ET exist ===" << endl;
         }
         else{
             cout << "something else happened" << endl;
@@ -157,12 +157,12 @@ int setnonblocking(int fd){
     return old_option;
 }
 
-void addfd(int epollfd, int fd, bool enable_et){
+void addfd(int epollfd, int sockfd, bool enable_et){
     epoll_event event;
-    event.data.fd = fd;
+    event.data.fd = sockfd;
     event.events = EPOLLIN;
     if(enable_et) event.events |= EPOLLET;
 
-    epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
-    setnonblocking(fd);
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, sockfd, &event);
+    setnonblocking(sockfd);
 }
