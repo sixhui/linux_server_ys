@@ -19,6 +19,12 @@ void    addfd(int epollfd, int sfd, bool enable_et);
 void    lt(epoll_event* events, int number, int epollfd, int listenfd);
 void    et(epoll_event* events, int number, int epollfd, int listenfd);
 
+/**
+ * @brief 测试 epoll 的 LT 模式和 ET 模式
+ * 注意：LT 模式下只要 socket 读缓存还有未读出的数据就会触发              - 会重复触发
+ * 注意：ET 模式下读就绪事件只触发一次，所以需要用 while 确保数据全部读出  - 只触发一次
+ * 注意：使用 ET 模式的 socket 必须是非阻塞的，因为 ET 模式需要使用 while，阻塞的 read 无法获取读结束事件（一直阻塞）而无法跳出循环
+ */
 int main(int argc, char const *argv[])
 {
     int ip      = INADDR_ANY;
@@ -50,8 +56,8 @@ int main(int argc, char const *argv[])
     while(1){
         if((event_n = epoll_wait(epollfd, events, MAX_EVENT_N, -1)) < 0) oops("fail epoll_wait");
 
-        // lt(events, event_n, epollfd, listenfd);
-        et(events, event_n, epollfd, listenfd);
+        lt(events, event_n, epollfd, listenfd);
+        // et(events, event_n, epollfd, listenfd);
     }
     
     close(listenfd);
