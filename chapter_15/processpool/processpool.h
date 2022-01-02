@@ -64,6 +64,8 @@ private:
     int                         m_idx;                  // 子进程编号
     int                         m_stop;                 // 子进程停止判断标志
     int                         m_listenfd;             // 监听套接字
+    int                         m_epollfd;
+    int                         m_stop;     
 
     static const int            MAX_PROCESS_N   = 16;   // 进程池允许的最大子进程数量
     static const int            USER_PER_PROCESS= 65526;// 每个子进程最大处理的用户数
@@ -138,17 +140,24 @@ m_listenfd(listenfd), m_process_n(process_number), m_idx(-1), m_stop(false){
     }
 }
 
-/* 统一事件源 */
+/* 统一事件源 - 往 sigpipefd[1] 写 */
 template<typename T>
 void processpool<T>::setup_sig_pipe(){
     // 创建事件监听 epoll
+    if((m_epollfd = epoll_create(5)) == -1) oops("fail epoll_create");
 
     // 创建信号管道
+    if(socketpair(PF_UNIX, SOCK_STREAM, 0, sig_pipefd) == -1) oops("fail socketpair");
 
     // 监听信号管道
+    setnonblock(sig_pipefd[1]);
+    addfd(m_epollfd, sig_pipefd[0]);
 
     // 设置信号处理函数
-
+    addsig(SIGCHLD, sig_handler);
+    addsig(SIGTERM, sig_handler);
+    addsig(SIGINT,  sig_handler);
+    addsig(SIGPIPE, SIG_IGN);
 }
 
 template<typename T>
@@ -161,11 +170,62 @@ void processpool<T>::run(){
     }
 }
 
+/**
+ * @brief 子进程负责处理业务
+ * 每个子进程有两个管道：信号管道 + 与父进程通信管道
+ */
 template<typename T>
 void processpool<T>::run_child(){
+    epoll_event events[MAX_EVENT_N];
+    T*          users;
+    int         pipefd;
+    int         event_n;
+    int         n_read;
 
+    // 初始化 epollfd！！！ 父子进程的 m_epollfd 不是同一个，是各自创建的 - 把 epollfd 创建过程提取出来比较好
+    setup_sig_pipe();
+
+    pipefd = m_sub_process[m_idx].m_pipefd[1]; // 父进程用 0，子进程用 1
+    addfd(m_epollfd, pipefd);
+
+    if((users = new T[USER_PER_PROCESS]) == NULL) oops("fail new T[]");
+
+    while(!m_stop){
+        // 监听
+        if((event_n = epoll_wait(m_epollfd, events, MAX_EVENT_N, -1)) < 0 && (errno != EINTR)){
+            printf("fail epoll_wait\n");
+            break;
+        }
+
+        // 处理
+        for(int i = 0; i < event_n; ++i){
+            int sockfd = events[i].data.fd;
+            if((sockfd == pipefd) && (events[i].events & EPOLLIN)){                 // 主进程 - 客户连接请求
+
+            }
+            else if((sockfd == sig_pipefd[0]) && (events[i].events & EPOLLIN)){     // 信号
+
+            }
+            else if(events[i].events & EPOLLIN){                                    // 客户数据请求
+
+            }
+            else{
+                continue;
+            }
+        }
+
+        delete[] users;
+        users = NULL;
+        close(pipefd);
+        close(m_epollfd);
+
+    }
 }
 
+/**
+ * @brief 
+ * 
+ */
 template<typename T>
 void processpool<T>::run_parent(){
 
