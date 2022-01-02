@@ -30,6 +30,7 @@ public:
  * 注意：进程对象的 m_pid 字段和进程池对象的 m_idx 字段不相同
  * 注意：为什么 sig_pipefd 需要在类外 static，类内 static 不可以吗 - 考虑 fork 子进程后管道不唯一
  * 注意：信号大小为 1B 正整数
+ * 注意：为什么要统一事件源
  */
 template<typename T>
 class processpool{
@@ -115,6 +116,7 @@ static void addsig(int sig, void(handler)(int), bool restart=true){
 template<typename T>
 processpool<T>* processpool<T>::m_instance = NULL;
 
+/* 构造函数 */
 template<typename T>
 processpool<T>::processpool(int listenfd, int process_number): 
 m_listenfd(listenfd), m_process_n(process_number), m_idx(-1), m_stop(false){
@@ -134,5 +136,38 @@ m_listenfd(listenfd), m_process_n(process_number), m_idx(-1), m_stop(false){
             break;
         }
     }
+}
+
+/* 统一事件源 */
+template<typename T>
+void processpool<T>::setup_sig_pipe(){
+    // 创建事件监听 epoll
+
+    // 创建信号管道
+
+    // 监听信号管道
+
+    // 设置信号处理函数
+
+}
+
+template<typename T>
+void processpool<T>::run(){
+    if(m_idx != -1){
+        run_child();
+    }
+    else{
+        run_parent();
+    }
+}
+
+template<typename T>
+void processpool<T>::run_child(){
+
+}
+
+template<typename T>
+void processpool<T>::run_parent(){
+
 }
 
