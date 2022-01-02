@@ -213,13 +213,12 @@ void processpool<T>::run_child(){
                 continue;
             }
         }
-
-        delete[] users;
-        users = NULL;
-        close(pipefd);
-        close(m_epollfd);
-
     }
+
+    delete[] users;
+    users = NULL;
+    close(pipefd);
+    close(m_epollfd);
 }
 
 /**
@@ -228,6 +227,37 @@ void processpool<T>::run_child(){
  */
 template<typename T>
 void processpool<T>::run_parent(){
+    epoll_event events[MAX_EVENT_N];
+    int event_n;
 
+    // 初始化 epollfd！！！ 父子进程的 m_epollfd 不是同一个，是各自创建的 - 把 epollfd 创建过程提取出来比较好
+    setup_sig_pipe();
+
+    addfd(m_epollfd, m_listenfd);
+
+    while(!m_stop){
+        // 监听
+        if((event_n = epoll_wait(m_epollfd, events, MAX_EVENT_N, -1)) < 0 && (errno != EINTR)){
+            printf("fail epoll_wait\n");
+            break;
+        }
+
+        // 处理
+        for(int i = 0; i < event_n; ++i){
+            int sockfd = events[i].data.fd;
+            if(sockfd == m_listenfd){                                           // 客户连接请求
+
+            }
+            else if((sockfd == sig_pipefd[0]) && (events[i].events & EPOLLIN)){ // 信号
+
+            }
+            else{
+                continue;
+            }
+        }
+    }
+
+    // close(m_listenfd);
+    close(m_epollfd);
 }
 
