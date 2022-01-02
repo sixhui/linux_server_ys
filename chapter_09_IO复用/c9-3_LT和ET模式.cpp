@@ -30,9 +30,8 @@ int main(int argc, char const *argv[])
     int ip      = INADDR_ANY;
     int port    = 12345;
     int listenfd, backlog = 5;
-    int epollfd;
+    int epollfd, event_n;
     epoll_event events[MAX_EVENT_N];    // 接收 socket 就绪事件
-    int event_n;
 
     // socket
     if((listenfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) oops("fail socket");
@@ -74,8 +73,8 @@ void lt(epoll_event* events, int number, int epollfd, int listenfd){
         sockfd = events[i].data.fd;
         if(sockfd == listenfd){             // listenfd 的事件：接受 clnt_sock，并添加到 epollfd 进行监听
             int                 clnt_sock;
-            struct sockaddr_in  clnt_addr;
-            socklen_t           clnt_addr_len = sizeof(clnt_addr);
+            // struct sockaddr_in  clnt_addr;
+            // socklen_t           clnt_addr_len = sizeof(clnt_addr);
 
             if((clnt_sock = accept(listenfd, 0, 0)) == -1) {
                 oops("fail accept == -1");
@@ -125,7 +124,7 @@ void et(epoll_event* events, int number, int epollfd, int listenfd){
         else if(events[i].events & EPOLLIN){
             cout << "===EPOLLIN ET triger===" << endl;
 
-            while(1){
+            while(1){ // while if 里的 break 是离开 while 的出口
                 memset(buf, '\0', BUFFER_SIZE);
                 n_read = recv(sockfd, buf, BUFFER_SIZE - 1, 0);
                 cout << "n read " << n_read << endl;

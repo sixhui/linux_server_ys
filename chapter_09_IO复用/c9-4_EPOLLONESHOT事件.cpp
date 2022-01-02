@@ -10,75 +10,73 @@
 #include <assert.h>
 using namespace std;
 
-#define MAX_EVENT_NUMBER 1024
-#define BUFFER_SIZE 1024
+#define     MAX_EVENT_N         1024
+#define     MAX_LISTENED_SOCK_N 5
+#define     BUFFER_SIZE         1024
+#define     BACKLOG             5
+#define     oops(msg)           {perror(msg); exit(1);}
 struct fds{
     int epollfd;
     int sockfd;
 };
 
-int setnonblocking(int sfd);
-void reset_oneshot(int epollfd, int sfd);
-void addfd(int epollfd, int sfd, bool oneshot);
-/* 工作线程任务 */
-void* worker(void* arg);
+int     setnonblocking(int sockfd);
+void    reset_oneshot(int epollfd, int sockfd);
+void    addfd(int epollfd, int sockfd, bool oneshot);
+void*   worker(void* arg);
 
 int main(int argc, char const *argv[])
 {
-    assert(argc == 1);
-
-    int port = 12345;
-    int listenfd, backlog = 5;
-    int epollfd, sfd_num;
-    int res;
-
-    struct sockaddr_in serv_addr, clnt_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(port);
+    int         ip      = INADDR_ANY;
+    int         port    = 12345;
+    int         listenfd;
+    int         epollfd, event_n;
+    sockaddr_in serv_addr, clnt_addr;
+    epoll_event events[MAX_EVENT_N];    // 接收 epoll_wait 反馈
 
     // socket
     listenfd = socket(PF_INET, SOCK_STREAM, 0);
     assert(listenfd >= 0);
 
     // bind
-    res = bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-    assert(res != -1);
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family        = AF_INET;
+    serv_addr.sin_addr.s_addr   = htonl(ip);
+    serv_addr.sin_port          = htons(port);
+
+    if((bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr))) == -1) oops("fail bind");
 
     // listen
-    res = listen(listenfd, backlog);
-    assert(res != -1);
+    if(listen(listenfd, BACKLOG) == -1) oops("fail listen");
 
     // epoll
-    epoll_event events[MAX_EVENT_NUMBER];   // 接收 epoll_wait 反馈
-    epollfd = epoll_create(sfd_num);
-    assert(epollfd != -1);
-
-    /* listenfd 上不能注册 EPOLLONESHOT 事件，否则后续客户端连接将不再触发 EPOLLIIN 事件 */
-    addfd(epollfd, listenfd, false);
+    if((epollfd = epoll_create(MAX_LISTENED_SOCK_N)) == -1) oops("fail epoll_create");
+    addfd(epollfd, listenfd, false);    // /* listenfd 上不能注册 EPOLLONESHOT 事件，否则后续客户端连接将不再触发 EPOLLIIN 事件 */
 
     while(1){
         /* 在此阻塞 */
         cout << "epoll wait pre" << endl;
-        res = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, -1);
+        if((event_n = epoll_wait(epollfd, events, MAX_EVENT_N, -1)) == -1) oops("fail epoll_wait");
         cout << "epoll wait after" << endl;
-        assert(res != -1);
 
-        for(int i = 0; i < res; ++i){
+        for(int i = 0; i < event_n; ++i){
             int sfd = events[i].data.fd;
-            if(sfd == listenfd){
-                socklen_t clnt_addr_len = sizeof(clnt_addr);
-                int clnt_sock = accept(listenfd, (struct sockaddr*) &clnt_addr, &clnt_addr_len);
-                /* 客户端 socket 上注册 EPOLLONESHOT 事件 */
-                addfd(epollfd, clnt_sock, true);
+            if(sfd == listenfd){                    // 监听套接字
+                int clnt_sock;
+
+                if((clnt_sock = accept(listenfd, 0, 0)) == -1){
+                    oops("fail accept");
+                }
+                else{
+                    addfd(epollfd, clnt_sock, true); /* 客户端 socket 上注册 EPOLLONESHOT 事件 */
+                }
             }
-            else if(events[i].events & EPOLLIN){
+            else if(events[i].events & EPOLLIN){    // 连接套接字
                 pthread_t thread;
 
                 fds fds_for_new_worker;
-                fds_for_new_worker.epollfd = epollfd;
-                fds_for_new_worker.sockfd = sfd;
+                fds_for_new_worker.epollfd  = epollfd;
+                fds_for_new_worker.sockfd   = sfd;
 
                 /* 启动一个工作线程为 sfd 服务 */
                 pthread_create(&thread, NULL, worker, (void*)&fds_for_new_worker);
