@@ -1,3 +1,6 @@
+#ifndef PROCESSPOOL_H
+#define PROCESSPOOL_H
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -10,6 +13,7 @@
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <errno.h>
+#include <sys/wait.h>
 
 #define     oops(msg)       {perror(msg); exit(1);}
 
@@ -65,7 +69,6 @@ private:
     int                         m_stop;                 // 子进程停止判断标志
     int                         m_listenfd;             // 监听套接字
     int                         m_epollfd;
-    int                         m_stop;     
 
     static const int            MAX_PROCESS_N   = 16;   // 进程池允许的最大子进程数量
     static const int            USER_PER_PROCESS= 65526;// 每个子进程最大处理的用户数
@@ -127,6 +130,8 @@ m_listenfd(listenfd), m_process_n(process_number), m_idx(-1), m_stop(false){
     if((m_sub_process = new process[process_number]) == NULL) oops("fail new process[]");
     // 创建 process_number 个子进程，并建立它们和父进程之间的管道
     for(int i = 0; i < process_number; ++i){
+        if(socketpair(PF_UNIX, SOCK_STREAM, 0, m_sub_process[i].m_pipefd) == -1) oops("fail socketpair");
+        
         if((m_sub_process[i].m_pid = fork()) < 0) oops("fail fork");
         if(m_sub_process[i].m_pid > 0){                 // 父进程
             close(m_sub_process[i].m_pipefd[1]);
@@ -196,18 +201,60 @@ void processpool<T>::run_child(){
             printf("fail epoll_wait\n");
             break;
         }
-
+        printf("child %d receive epoll event\n", m_idx);
         // 处理
         for(int i = 0; i < event_n; ++i){
             int sockfd = events[i].data.fd;
-            if((sockfd == pipefd) && (events[i].events & EPOLLIN)){                 // 主进程 - 客户连接请求
-
+            if((sockfd == pipefd) && (events[i].events & EPOLLIN)){                 // 父子进程管道读取 - 客户连接请求
+                int client = 0; // 可删？
+                n_read = recv(sockfd, (char*)&client, sizeof(client), 0);
+                if(((n_read < 0) && (errno != EAGAIN)) || n_read == 0){
+                    continue;
+                }
+                
+                // 获取客户端连接
+                struct sockaddr_in  clnt_addr;
+                socklen_t           clnt_addr_len;
+                int connfd  = accept(m_listenfd, (struct sockaddr*)&clnt_addr, &clnt_addr_len);
+                if(connfd < 0) {
+                    printf("errno is: %d\n", errno);
+                    continue;
+                }
+                // 监听客户端连接
+                addfd(m_epollfd, connfd);
+                // 初始化处理器
+                users[connfd].init(m_epollfd, connfd, clnt_addr);
             }
             else if((sockfd == sig_pipefd[0]) && (events[i].events & EPOLLIN)){     // 信号
-
+                int sig;
+                char signals[1024];
+                n_read = recv(sig_pipefd[0], signals, sizeof(signals), 0);
+                if(n_read <= 0){
+                    continue;
+                }
+                else{
+                    for(int i = 0; i < n_read; ++i){
+                        switch(signals[i]){
+                            case SIGCHLD:{
+                                pid_t pid;
+                                int stat;
+                                while((pid = waitpid(-1, &stat, WNOHANG)) > 0){ // 子进程，有必要吗
+                                    continue;
+                                }
+                                break;
+                            }
+                            case SIGTERM:
+                            case SIGINT:{
+                                m_stop = true;
+                                break;
+                            }
+                            default: break;
+                        }
+                    }
+                }
             }
-            else if(events[i].events & EPOLLIN){                                    // 客户数据请求
-
+            else if(events[i].events & EPOLLIN){                                    // 客户数据请求 - 调用逻辑处理对象
+                users[sockfd].process();
             }
             else{
                 continue;
@@ -218,17 +265,21 @@ void processpool<T>::run_child(){
     delete[] users;
     users = NULL;
     close(pipefd);
+    // close(m_listenfd); // 谁创建，谁关闭
     close(m_epollfd);
 }
 
 /**
- * @brief 
+ * @brief 父进程，主要分配任务
  * 
  */
 template<typename T>
 void processpool<T>::run_parent(){
     epoll_event events[MAX_EVENT_N];
     int event_n;
+    int n_read = -1;
+    int sub_process_counter = 0;
+    int new_conn = 1;
 
     // 初始化 epollfd！！！ 父子进程的 m_epollfd 不是同一个，是各自创建的 - 把 epollfd 创建过程提取出来比较好
     setup_sig_pipe();
@@ -245,11 +296,62 @@ void processpool<T>::run_parent(){
         // 处理
         for(int i = 0; i < event_n; ++i){
             int sockfd = events[i].data.fd;
-            if(sockfd == m_listenfd){                                           // 客户连接请求
+            if(sockfd == m_listenfd){                                           // 客户连接请求 - 为新连接分配一个子进程
+                int i = sub_process_counter;
+                do{
+                    if(m_sub_process[i].m_pid != -1) break;
+                    i = (i + 1) % m_process_n; // 改为 m_sub_process_n
+                }while(i != sub_process_counter);
 
+                if(m_sub_process[i].m_pid == -1){
+                    m_stop = true;
+                    break;
+                }
+
+                sub_process_counter = (i + 1) % m_process_n;
+                // 通知子进程 - 不是用信号！！！
+                int res = send(m_sub_process[i].m_pipefd[0], (char*)&new_conn, sizeof(new_conn), 0);
+                printf("%d\n", errno);
+                printf("send request to child %d - res %d\n", i, res);
             }
             else if((sockfd == sig_pipefd[0]) && (events[i].events & EPOLLIN)){ // 信号
+                int sig;
+                char signals[1024];
+                n_read = recv(sig_pipefd[0], signals, sizeof(signals), 0);
+                if(n_read <= 0) continue;
 
+                for(int i = 0; i < n_read; ++i){
+                    switch(signals[i]){
+                        case SIGCHLD:{
+                            pid_t pid;
+                            int stat;
+                            while((pid = waitpid(-1, &stat, WNOHANG)) > 0){
+                                // 进程池中pid子进程退出，则主进程需要清理相应管道，并设置相应m_pid为-1，标记退出
+                                for(int i = 0; i < m_process_n; ++i){
+                                    if(m_sub_process[i].m_pid == pid){
+                                        printf("child %d join\n", i);
+                                        close(m_sub_process[i].m_pipefd[0]);
+                                        m_sub_process[i].m_pid = -1;
+                                    }
+                                }
+                            }
+                            // 检查是否全部子进程都退出了，是则主进程也退出
+                            m_stop = true;
+                            for(int i = 0; i < m_process_n; ++i){
+                                if(m_sub_process[i].m_pid != -1) m_stop = false;
+                            }
+                            break;
+                        }
+                        case SIGTERM:
+                        case SIGINT:{   // 父进程收到终止信号，则杀死所有子进程
+                            printf("kill all the child now\n");
+                            for(int i = 0; i < m_process_n; ++i){
+                                if(m_sub_process[i].m_pid != -1) kill(m_sub_process[i].m_pid, SIGTERM);
+                            }
+                        }
+                        default: break;
+                    }
+                }
             }
             else{
                 continue;
@@ -261,3 +363,5 @@ void processpool<T>::run_parent(){
     close(m_epollfd);
 }
 
+
+#endif
