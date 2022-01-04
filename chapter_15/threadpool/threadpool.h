@@ -21,7 +21,7 @@ using std::list;
 /**
  * @brief 
  * 
- * 注意：使用工作队列 + 生产者消费者模式，解耦主线程和子线程
+ * 注意：主线程和子线程间使用"工作队列 + 生产者消费者模式"，解耦主线程和子线程
  * 注意：必须保证所有客户请求是无状态的，因为同一个连接上的不同请求可能会由不同的线程处理
  */
 template<typename T>
@@ -51,7 +51,49 @@ private:
 
 };
 
+template<typename T>
+threadpool<T>::threadpool(int thread_n, int max_requests):
+m_thread_n(thread_n), m_max_requests(max_requests), m_stop(false), m_threads(NULL){
+    // 参数检查
+    if((thread_n <= 0) || (max_requests <= 0)) throw exception();
+    
+    // 创建 thread_n 个线程，并设置为脱离线程
+    m_threads = new pthread_t[m_thread_n];
+    if(!m_threads) throw exception();
 
+    for(int i = 0; i < thread_n; ++i){
+        printf("create the %dth thread\n", i);
+        if(pthread_create(m_threads + i, NULL, worker, this) != 0){ // 可以合二为一吧
+            delete [] m_threads;
+            throw exception();
+        }
+        if(pthread_detach(m_threads[i]) != 0){
+            delete [] m_threads;
+            throw exception();
+        }
+    }
+}
+
+template<typename T>
+threadpool<T>::~threadpool(){
+    delete[] m_threads;
+    m_stop = true;
+}
+
+template<typename T>
+bool threadpool<T>::append(T* request){
+
+}
+
+template<typename T>
+void* threadpool<T>::worker(void* arg){
+
+}
+
+template<typename T>
+void threadpool<T>::run(){
+    
+}
 
 #endif
 
