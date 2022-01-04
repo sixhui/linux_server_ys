@@ -26,7 +26,7 @@ FORBIDDEN_REQUEST, INTERNAL_ERROR, CLOSED_CONNECTION};
 const char* szret[]     = {"I get a correct result\n", "something wrong\n"};
 
 HTTP_CODE   parse_content(char* buf, int& checked_index, CHECK_STATE& check_state, int& read_index, int& line_index);
-LINE_STATE  parse_line(char* buf, int& check_index, int& read_index);
+LINE_STATE  parse_line(char* buf, int& checked_index, int& read_index);
 HTTP_CODE   parse_requestline(char* temp, CHECK_STATE& check_state);
 HTTP_CODE   parse_headers(char* temp);
 
@@ -125,16 +125,27 @@ HTTP_CODE   parse_content(char* buf, int& checked_index, CHECK_STATE& check_stat
     return BAD_REQUEST;
 }
 
-/* 从状态机，分离出一行 */
-LINE_STATE  parse_line(char* buf, int& check_index, int& read_index){
-    char temp;
-    for(; check_index < read_index; ++check_index){
-        temp = buf[check_index];
-        if(temp == '\r'){
-            
+/* 从状态机，分离出一行：[checked_index, read_index) 划定了数据的首尾；检查 '\r\n' */
+LINE_STATE  parse_line(char* buf, int& checked_index, int& read_index){
+    char cur_char;
+    for(; checked_index < read_index; ++checked_index){
+        cur_char = buf[checked_index];
+        if(cur_char == '\r'){           // buf[checked_index] == '\r' && buf[checked_index + 1] == '\n'
+            if((checked_index + 1) == read_index) return LINE_OPEN;
+            if(buf[checked_index + 1] == '\n'){
+                buf[checked_index++] = '\0';
+                buf[checked_index++] = '\0';
+                return LINE_OK;
+            }
+            return LINE_BAD;
         }
-        else if(temp == '\n'){
-
+        else if(cur_char == '\n'){      // buf[checked_index - 1] == '\r' && buf[checked_index] == '\n'
+            if(checked_index > 1 && buf[checked_index - 1] == '\r'){
+                buf[checked_index++] = '\0';
+                buf[checked_index++] = '\0';
+                return LINE_OK;
+            }
+            return LINE_BAD;
         }
     }
 
